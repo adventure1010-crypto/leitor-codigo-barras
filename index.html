@@ -38,7 +38,7 @@
     <p class="small">A câmera só funciona em HTTPS e depois que você permitir o acesso no navegador.</p>
   </main>
 
-  <script src="https://unpkg.com/@zxing/browser@0.1.5/umd/index.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script>
     (() => {
       const video = document.getElementById('video');
@@ -93,18 +93,30 @@
           setStatus('Este navegador não disponibiliza acesso à câmera nesta página.');
           return;
         }
-        if (!window.ZXingBrowser || !window.ZXingBrowser.BrowserMultiFormatReader) {
-          setStatus('A biblioteca do leitor não carregou. Confira se o acesso ao unpkg.com está liberado.');
+        if (typeof window.Html5Qrcode === 'undefined') {
+          setStatus('A biblioteca de leitura não carregou. Atualize a página; se continuar, a rede pode estar bloqueando o CDN jsDelivr.');
           return;
         }
         startButton.disabled = true;
         setStatus('Solicitando acesso à câmera…');
         try {
-          reader = new window.ZXingBrowser.BrowserMultiFormatReader();
-          controls = await reader.decodeFromVideoDevice(undefined, video, (result, error) => {
-            if (result) sendCode(result.getText());
-            // Os erros de leitura por quadro são esperados enquanto nenhum código aparece.
-          });
+          // A biblioteca cria seu próprio vídeo dentro do elemento informado.
+          video.style.display = 'none';
+          const scannerRegion = document.createElement('div');
+          scannerRegion.id = 'scanner-region';
+          scannerRegion.style.width = '100%';
+          scannerRegion.style.minHeight = '220px';
+          scannerRegion.style.background = '#111827';
+          scannerRegion.style.borderRadius = '12px';
+          video.insertAdjacentElement('afterend', scannerRegion);
+          reader = new window.Html5Qrcode('scanner-region', { verbose: false });
+          await reader.start(
+            { facingMode: 'environment' },
+            { fps: 10, qrbox: { width: 280, height: 140 }, aspectRatio: 1.777778 },
+            decodedText => sendCode(decodedText),
+            () => {}
+          );
+          controls = { stop: async () => { if (reader && reader.isScanning) await reader.stop(); reader.clear(); const region = document.getElementById('scanner-region'); if (region) region.remove(); video.style.display = 'block'; } };
           stopButton.disabled = false;
           setStatus('Câmera ativa. Aponte para o código de barras.');
         } catch (error) {
