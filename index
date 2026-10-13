@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leitor de código de barras</title>
+  <style>
+    :root { color-scheme: light; font-family: Arial, sans-serif; }
+    body { margin: 0; padding: 20px; background: #f3f4f6; color: #111827; }
+    main { max-width: 620px; margin: 0 auto; background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 18px #00000012; }
+    h1 { font-size: 1.4rem; margin-top: 0; }
+    p { line-height: 1.45; }
+    video { display: block; width: 100%; min-height: 220px; max-height: 55vh; object-fit: cover; background: #111827; border-radius: 12px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+    button { border: 0; border-radius: 9px; padding: 12px 16px; font-size: 1rem; cursor: pointer; background: #111827; color: white; }
+    button.secondary { background: #e5e7eb; color: #111827; }
+    input { box-sizing: border-box; width: 100%; padding: 12px; border: 1px solid #cbd5e1; border-radius: 9px; font-size: 1rem; margin: 6px 0 12px; }
+    #status { padding: 10px 12px; background: #f3f4f6; border-radius: 8px; font-size: .95rem; }
+    .small { font-size: .88rem; color: #4b5563; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Leitor de código de barras</h1>
+    <p>Aponte a câmera para o código. Quando ele for reconhecido, o leitor enviará o resultado de volta ao Controle de Estoque, se essa página tiver sido aberta por ele.</p>
+    <video id="video" muted playsinline></video>
+    <div class="actions">
+      <button id="start">Abrir câmera</button>
+      <button id="stop" class="secondary" disabled>Parar câmera</button>
+    </div>
+    <p id="status" role="status">Pronto para iniciar.</p>
+    <label for="manual"><strong>Ou digite o código manualmente</strong></label>
+    <input id="manual" autocomplete="off" placeholder="Código de barras">
+    <div class="actions">
+      <button id="useManual">Usar código</button>
+      <button id="close" class="secondary">Fechar leitor</button>
+    </div>
+    <p class="small">A câmera só funciona em HTTPS e depois que você permitir o acesso no navegador.</p>
+  </main>
+
+  <script src="https://unpkg.com/@zxing/browser@0.1.5/umd/index.min.js"></script>
+  <script>
+    (() => {
+      const video = document.getElementById('video');
+      const status = document.getElementById('status');
+      const startButton = document.getElementById('start');
+      const stopButton = document.getElementById('stop');
+      const manualInput = document.getElementById('manual');
+      let reader = null;
+      let controls = null;
+      let completed = false;
+
+      function setStatus(message) { status.textContent = message; }
+
+      async function stopCamera() {
+        try { if (controls && typeof controls.stop === 'function') controls.stop(); } catch (_) {}
+        controls = null;
+        try {
+          if (video.srcObject) {
+            video.srcObject.getTracks().forEach(track => track.stop());
+            video.srcObject = null;
+          }
+        } catch (_) {}
+        stopButton.disabled = true;
+        startButton.disabled = false;
+      }
+
+      function sendCode(value) {
+        const code = String(value || '').trim();
+        if (!code || completed) return;
+        completed = true;
+        manualInput.value = code;
+        setStatus('Código lido: ' + code);
+        stopCamera();
+        if (window.opener && !window.opener.closed) {
+          window.opener.postMessage({ type: 'BARCODE_SCANNED', code }, '*');
+          setStatus('Código enviado ao Controle de Estoque: ' + code);
+          setTimeout(() => window.close(), 700);
+        } else {
+          setStatus('Código lido. Esta página foi aberta sozinha; copie o código para o estoque.');
+          manualInput.focus();
+          manualInput.select();
+        }
+      }
+
+      async function startCamera() {
+        completed = false;
+        if (!window.isSecureContext) {
+          setStatus('Esta página precisa ser aberta por HTTPS para acessar a câmera.');
+          return;
+        }
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          setStatus('Este navegador não disponibiliza acesso à câmera nesta página.');
+          return;
+        }
+        if (!window.ZXingBrowser || !window.ZXingBrowser.BrowserMultiFormatReader) {
+          setStatus('A biblioteca do leitor não carregou. Confira se o acesso ao unpkg.com está liberado.');
+          return;
+        }
+        startButton.disabled = true;
+        setStatus('Solicitando acesso à câmera…');
+        try {
+          reader = new window.ZXingBrowser.BrowserMultiFormatReader();
+          controls = await reader.decodeFromVideoDevice(undefined, video, (result, error) => {
+            if (result) sendCode(result.getText());
+            // Os erros de leitura por quadro são esperados enquanto nenhum código aparece.
+          });
+          stopButton.disabled = false;
+          setStatus('Câmera ativa. Aponte para o código de barras.');
+        } catch (error) {
+          startButton.disabled = false;
+          stopButton.disabled = true;
+          const name = error && error.name ? error.name : 'Erro';
+          const message = error && error.message ? error.message : 'Não foi possível iniciar a câmera.';
+          setStatus(name + ': ' + message + '. Verifique a permissão da câmera e tente novamente.');
+        }
+      }
+
+      startButton.addEventListener('click', startCamera);
+      stopButton.addEventListener('click', async () => {
+        await stopCamera();
+        setStatus('Câmera parada.');
+      });
+      document.getElementById('useManual').addEventListener('click', () => sendCode(manualInput.value));
+      document.getElementById('close').addEventListener('click', async () => {
+        await stopCamera();
+        window.close();
+        setStatus('Você pode fechar esta guia.');
+      });
+      manualInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') sendCode(manualInput.value);
+      });
+      window.addEventListener('pagehide', stopCamera);
+    })();
+  </script>
+</body>
+</html>
